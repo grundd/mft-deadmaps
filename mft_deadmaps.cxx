@@ -35,7 +35,9 @@ bool download_deadmap (int run, bool verbose = true, bool debug = false)
 
   auto runinf = o2::parameters::AggregatedRunInfo::buildAggregatedRunInfo(o2::ccdb::BasicCCDBManager::instance(), run);
   long ts_sor = runinf.sor;
+  long ts_eor = runinf.eor;
   cout << " SOR: " << ts_sor << "\n";
+  cout << " EOR: " << ts_eor << "\n";
   //long ts_eor
 
   /*
