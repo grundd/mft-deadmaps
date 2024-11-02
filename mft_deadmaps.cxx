@@ -33,7 +33,16 @@ bool download_deadmap (int run, bool verbose = true, bool debug = false)
   gStyle->SetOptStat(0);
   gStyle->SetPalette(kWaterMelon);
 
-  gSystem->Exec("mkdir -p dead_maps/");
+  auto runinf = o2::parameters::AggregatedRunInfo::buildAggregatedRunInfo(o2::ccdb::BasicCCDBManager::instance(), run);
+  long ts_sor = runinf.sor;
+  cout << " SOR: " << ts_sor << "\n";
+  //long ts_eor
+
+  /*
+  std::cout << "orbitSOR=" << ri.orbitSOR << " orbitEOR=" << ri.orbitEOR << " orbitsPerTF=" << ri.orbitsPerTF  << ri.orbitEOR << " sor=" << ri.sor << " orbitReset=" << ri.orbitReset  << "\n";
+  orbitSOR=18001664 orbitEOR=489344256 orbitsPerTF=32489344256 sor=1730309106567 orbitReset=1730307505776379
+  ri.grpECS->print();
+  */
 
   long ts_stf = get_timestamp(run, "STF"); // start of the first TF
   long ts_etf = get_timestamp(run, "ETF"); // end of the last TF
@@ -42,6 +51,8 @@ bool download_deadmap (int run, bool verbose = true, bool debug = false)
       << " STF: " << ts_stf << "\n"
       << " ETF: " << ts_etf << "\n";
   }
+
+  return false;
 
   std::map<std::string, std::string> metadata;
   metadata["runNumber"] = std::to_string(run);
@@ -124,6 +135,7 @@ bool download_deadmap (int run, bool verbose = true, bool debug = false)
     i_orb++;
   }
 
+  TCanvas* c1 = new TCanvas("", "", 900, 600);
   gr_trend->Draw("AL");
   int n_ok = 0;
   for (int i_chip = 0; i_chip < n_chips; i_chip++) {
@@ -150,6 +162,8 @@ bool download_deadmap (int run, bool verbose = true, bool debug = false)
       std::get<1>(dead_chips[i_dead]) / n_orbits * 100
     ));
   }
+
+  TCanvas* c2 = new TCanvas("", "", 900, 600);
   h_trend_chip->Draw("COL");
   return false;
 }
@@ -158,7 +172,7 @@ void mft_deadmaps ()
 {
   api.init("http://alice-ccdb.cern.ch");
 
-  download_deadmap(559361);
+  download_deadmap(559211);
 
   return;
 }
