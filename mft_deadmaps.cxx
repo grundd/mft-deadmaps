@@ -1,9 +1,22 @@
+#include <ctime>
 #include <vector>
 #include <map>
 #include "CCDB/CcdbApi.h"
 //#include "DataFormatsITSMFT/TimeDeadMap.h"
 
+const int n_masked = 28;
+int masked_chips[n_masked] = { // as of 2024
+  2, 8, 45, 46, 47, 68, 
+  102, 103, 104, 161, 162, 163, 
+  470, 476, 511, 536, 540, 541, 
+  542, 546, 547, 548, 549, 550, 
+  551, 579, 580, 581
+};
 o2::ccdb::CcdbApi api;
+long ts_SOR = -1;
+long ts_EOR = -1;
+long orbit_SOR = -1;
+long orbit_EOR = -1;
 
 bool sort_chips (std::tuple<int, float> chip1, std::tuple<int, float> chip2)
 {
@@ -14,53 +27,128 @@ bool sort_chips (std::tuple<int, float> chip1, std::tuple<int, float> chip2)
   }
 }
 
-long get_timestamp (int run, std::string str) 
+std::string unixts_to_string (long ts_ms, std::string format)
 {
-  long timestamp = -1;
-  std::map<std::string, std::string> hdRCT = api.retrieveHeaders("RCT/Info/RunInformation", map<std::string, std::string>(), run);
-  const auto startRCT = hdRCT.find(str);
-  if (startRCT != hdRCT.end()) {
-    timestamp = stol(startRCT->second);
-    std::cout << str << " found, timestamp: " << timestamp << "\n";
-  } else {
-    std::cout << str << " not found in headers!" << "\n";
-  }
-  return timestamp;
+  long ts_sec = ts_ms / 1000; // ms to sec
+  std::time_t ts_as_timet = ts_sec; // long to time_t
+  auto ts_as_tm = std::localtime(&ts_as_timet);
+  char buff[80];
+  std::strftime(buff, sizeof(buff), format.data(), ts_as_tm);
+  std::string date(buff);
+  return date;
 }
 
-bool download_deadmap (int run, bool verbose = true, bool debug = false)
+long orbit_to_unixts (long orbit)
+{
+  if (ts_SOR < 0 || ts_EOR < 0 || orbit_SOR < 0 || orbit_EOR < 0) {
+    std::cerr << "Unix timestamps or orbit numbers for SOR+EOR not set correctly!\n";
+    return -1;
+  }
+  // y = a * x + b (y = unixts, x = orbit)
+  double a = (double) (ts_EOR - ts_SOR) / (orbit_EOR - orbit_SOR);
+  double b = ts_EOR - a * orbit_EOR;
+  return (long)(orbit * a + b);
+}
+
+template<typename T>
+void set_margins (T* c, float t, float r, float b, float l)
+{
+  c->SetTopMargin(t); 
+  c->SetRightMargin(r);
+  c->SetBottomMargin(b);
+  c->SetLeftMargin(l);
+  return;
+}
+
+double get_fontsize (int n_chips)
+{
+  int n1 = 23;
+  int n2 = 51;
+  double size1 = 0.038;
+  double size2 = 0.025;
+  double a = (size2 - size1) / (n2 - n1);
+  double b = size2 - a * n2;
+  return n_chips * a + b;
+}
+
+template<typename T>
+void draw_time_axis (TCanvas* c, T* h, std::vector<unsigned long>* orbits)
+{
+  // to customize:
+  int n_labels = 20;
+
+  h->GetYaxis()->SetTickLength(0.01); 
+  h->GetYaxis()->SetLabelSize(get_fontsize(h->GetNbinsY()));
+  h->GetYaxis()->SetTitleSize(0);
+  // suppress the x-axis labels, ticks and title
+  h->GetXaxis()->SetLabelSize(0);
+  h->GetXaxis()->SetTitleSize(0);
+  h->GetXaxis()->SetTickSize(0);
+
+  // x-axis labels and ticks
+  c->cd();
+  int incr = orbits->size() / (float)(n_labels-1);
+  float y_low = h->GetYaxis()->GetBinLowEdge(1);
+  float y_upp = h->GetYaxis()->GetBinLowEdge(h->GetNbinsY()+1);
+  float dy = (y_upp - y_low) / (1. - c->GetTopMargin() - c->GetBottomMargin());
+  float tick_length = (y_upp - y_low) * 0.02;
+  for (int i = 0; i < n_labels; i++) 
+  {
+    int curr_bin = i * incr;
+    // tick 
+    TLine* l = new TLine(curr_bin, y_low, curr_bin, y_low + tick_length);
+    l->SetLineWidth(2);
+    l->Draw();
+    // label
+    auto orbit = orbits->at(curr_bin);
+    std::string label = unixts_to_string(orbit_to_unixts(orbit), "%d/%m, %H:%M");
+    float y_pos = y_low - dy * c->GetBottomMargin() / 20;
+    TLatex* t = new TLatex(curr_bin, y_pos, label.data());
+    t->SetTextSize(0.025);
+    t->SetTextFont(42);
+    t->SetTextAlign(33);
+    t->SetTextAngle(45);
+    t->Draw();
+  }
+  return;
+}
+
+void draw_title (TCanvas* c, std::string title)
+{
+  c->cd();
+  TLatex* t = new TLatex();
+  t->SetTextSize(0.032);
+  t->SetTextFont(42);
+  t->SetTextAlign(22);
+  t->DrawLatexNDC(0.5, 0.97, title.data());
+  return;
+}
+
+void analyze_deadmap (int run, bool verbose = false, bool debug = false)
 {
   gStyle->SetOptStat(0);
-  gStyle->SetPalette(kWaterMelon);
+  int palette[2] = {kWhite, kRed+1};
+  gStyle->SetPalette(2, palette);
 
-  auto runinf = o2::parameters::AggregatedRunInfo::buildAggregatedRunInfo(o2::ccdb::BasicCCDBManager::instance(), run);
-  long ts_sor = runinf.sor;
-  long ts_eor = runinf.eor;
-  cout << " SOR: " << ts_sor << "\n";
-  cout << " EOR: " << ts_eor << "\n";
-  //long ts_eor
+  auto runInf = o2::parameters::AggregatedRunInfo::buildAggregatedRunInfo(o2::ccdb::BasicCCDBManager::instance(), run);
+  ts_SOR = runInf.sor;
+  ts_EOR = runInf.eor;
+  orbit_SOR = runInf.orbitSOR;
+  orbit_EOR = runInf.orbitEOR;
+  cout << "Aggregated run information:\n"
+    << " SOR: " << ts_SOR 
+    << " (" << unixts_to_string((long)ts_SOR, "%m/%d/%Y, %H:%M:%S") << "), orbit: " << orbit_SOR << "\n"
+    << " EOR: " << ts_EOR 
+    << " (" << unixts_to_string((long)ts_EOR, "%m/%d/%Y, %H:%M:%S") << "), orbit: " << orbit_EOR << "\n";
 
-  /*
-  std::cout << "orbitSOR=" << ri.orbitSOR << " orbitEOR=" << ri.orbitEOR << " orbitsPerTF=" << ri.orbitsPerTF  << ri.orbitEOR << " sor=" << ri.sor << " orbitReset=" << ri.orbitReset  << "\n";
-  orbitSOR=18001664 orbitEOR=489344256 orbitsPerTF=32489344256 sor=1730309106567 orbitReset=1730307505776379
-  ri.grpECS->print();
-  */
-
-  long ts_stf = get_timestamp(run, "STF"); // start of the first TF
-  long ts_etf = get_timestamp(run, "ETF"); // end of the last TF
-  if (verbose) {
-    std::cout << "Run " << run << "\n"
-      << " STF: " << ts_stf << "\n"
-      << " ETF: " << ts_etf << "\n";
-  }
-
-  return false;
+  long duration = (ts_EOR - ts_SOR) / 1e3; // in seconds
+  std::cout << " run duration: " << duration / 60 << " min\n";
 
   std::map<std::string, std::string> metadata;
   metadata["runNumber"] = std::to_string(run);
-  auto deadmap = api.retrieveFromTFileAny<o2::itsmft::TimeDeadMap>("MFT/Calib/TimeDeadMap", metadata, ts_stf);
+  auto deadmap = api.retrieveFromTFileAny<o2::itsmft::TimeDeadMap>("MFT/Calib/TimeDeadMap", metadata, ts_SOR);
 
-  std::map<std::string, std::string> headers = api.retrieveHeaders("MFT/Calib/TimeDeadMap", metadata, ts_stf);
+  std::map<std::string, std::string> headers = api.retrieveHeaders("MFT/Calib/TimeDeadMap", metadata, ts_SOR);
   if (verbose) {
     std::map<std::string, std::string>::iterator it;
     for (it = headers.begin(); it != headers.end(); it++) std::cout << it->first << "\t" << it->second << "\n";
@@ -70,16 +158,19 @@ bool download_deadmap (int run, bool verbose = true, bool debug = false)
   long val_until = std::stol(headers["Valid-Until"]);  
 
   std::vector<unsigned long> orbits = deadmap->getEvolvingMapKeys();
-  unsigned long first_orbit = orbits.front();
-  unsigned long last_orbit = orbits.back();
-  std::cout << "First orbit: " << first_orbit << ", last orbit: " << last_orbit << "\n";
-  float bin_width = (last_orbit - first_orbit) / 100000;
-
-  long duration = (ts_etf - ts_stf) / 1e3; // duration in secs
+  unsigned long orbit_first = orbits.front();
+  unsigned long orbit_last = orbits.back();
   int n_orbits = orbits.size();
 
-  std::cout << "Duration: " << duration / 60 << " mins, #bins: " << n_orbits << "\n"
-    << " One bin ~" << (float)duration / n_orbits << " sec\n";
+  std::cout << "Deadmap information:\n"
+    << " valid from : " << val_from << " (" << unixts_to_string((long)val_from, "%m/%d/%Y, %H:%M:%S") << "\n"
+    << " valid until: " << val_until << " (" << unixts_to_string((long)val_until, "%m/%d/%Y, %H:%M:%S") << "\n";
+  
+  // does the map contain any orbits before SOR and after EOR
+  std::cout << " first orbit: " << orbit_first << "\n"
+    << "  difference to the orbit at SOR: " << (float)orbit_first-orbit_SOR << " (OK if positive)\n"
+    << " last orbit: " << orbit_last << "\n"
+    << "  difference to the orbit at EOR: " << (float)orbit_last-orbit_EOR << " (OK if negative)\n";
   
   int n_chips = 936;
   TGraph* gr_trend = new TGraph();
@@ -95,13 +186,13 @@ bool download_deadmap (int run, bool verbose = true, bool debug = false)
   int i_orb = 0;
   for (const auto &orbit : orbits) 
   {
-    if (orbit > last_orbit) continue; 
+    if (orbit > orbit_last) continue; 
     bool consecutive_chips = false;
     uint16_t first_dead = -1;
     int total_dead = 0;
 
     std::vector<uint16_t> chips = {};
-    long lower_orbit = deadmap->getMapAtOrbit(orbit, chips);
+    deadmap->getMapAtOrbit(orbit, chips);
     if (debug) std::cout << "Orbit " << orbit << ", " << chips.size() << " entries:\n";
     for (const auto &chip : chips) 
     {
@@ -137,8 +228,13 @@ bool download_deadmap (int run, bool verbose = true, bool debug = false)
     i_orb++;
   }
 
+  // trend of total #dead chips
   TCanvas* c1 = new TCanvas("", "", 900, 600);
+  set_margins(c1, 0.02, 0.02, 0.10, 0.12);
+  c1->cd();
   gr_trend->Draw("AL");
+
+  // count chips not present in the deadmap
   int n_ok = 0;
   for (int i_chip = 0; i_chip < n_chips; i_chip++) {
     if (((TH1C*)arr_chips->At(i_chip))->GetEntries() == 0) n_ok++;
@@ -147,34 +243,71 @@ bool download_deadmap (int run, bool verbose = true, bool debug = false)
   }
   std::cout << "#Chips not present in the dead map: " << n_ok << "\n";
 
-  // sort the chips in decreasing order
+  // sort the chips, the most dead chips first
   std::sort(dead_chips.begin(), dead_chips.end(), sort_chips);
-
   int n_dead = 0;
   while (std::get<1>(dead_chips[n_dead]) > 0) n_dead++;
   std::cout << "#Chips present in the dead map: " << n_dead << "\n";
 
-  TH2C* h_trend_chip = new TH2C("", "", n_orbits, 0, n_orbits, n_dead, 0, n_dead);
-  for (int i_dead = 0; i_dead < n_dead; i_dead++) {
+  // trend per chip
+  int n_unmasked = n_dead - n_masked;
+  if (n_unmasked < 0) {
+    std:cerr << "Problem with masked chips!\n";
+    return;
+  }
+  TH2C* h_trend_chips = new TH2C("", "", n_orbits, 0, n_orbits, n_dead, 0, n_dead);
+  TH2C* h_trend_unmasked = new TH2C("", "", n_orbits, 0, n_orbits, n_unmasked, 0, n_unmasked);
+
+  int i_unmasked = 0;
+  for (int i_dead = 0; i_dead < n_dead; i_dead++) 
+  {
     int idx_chip = std::get<0>(dead_chips[i_dead]);
+
+    // is this a masked chip?
+    bool is_masked = false;
+    int *masked = std::find(std::begin(masked_chips), std::end(masked_chips), idx_chip);
+    if (masked != std::end(masked_chips)) is_masked = true;
+
+    // loop over orbits:
     for (int i_orb = 0; i_orb < n_orbits; i_orb++) {
-      if (((TH1C*)arr_chips->At(idx_chip))->GetBinContent(i_orb) > 0) h_trend_chip->Fill(i_orb, n_dead-i_dead-1);
+      if (((TH1C*)arr_chips->At(idx_chip))->GetBinContent(i_orb) > 0) {  // the chip was dead in this orbit
+        // fill the histogram with all dead chips:
+        h_trend_chips->Fill(i_orb, n_dead-i_dead-1);
+        // fill the histo with unmasked only:
+        if (!is_masked) h_trend_unmasked->Fill(i_orb, n_unmasked-i_unmasked-1);
+      } 
     }
-    h_trend_chip->GetYaxis()->SetBinLabel(n_dead-i_dead, Form("#%i [%.0f%%]", idx_chip,
-      std::get<1>(dead_chips[i_dead]) / n_orbits * 100
-    ));
+
+    // set custom bin labels
+    h_trend_chips->GetYaxis()->SetBinLabel(n_dead-i_dead, Form("#%i [%.0f%%]", idx_chip,
+      std::get<1>(dead_chips[i_dead]) / n_orbits * 100));
+    if (!is_masked) {
+      h_trend_unmasked->GetYaxis()->SetBinLabel(n_unmasked-i_unmasked, Form("#%i [%.0f%%]", idx_chip,
+        std::get<1>(dead_chips[i_dead]) / n_orbits * 100));
+      i_unmasked++;
+    }
   }
 
   TCanvas* c2 = new TCanvas("", "", 900, 600);
-  h_trend_chip->Draw("COL");
-  return false;
+  set_margins(c2, 0.06, 0.02, 0.13, 0.12);
+  h_trend_chips->Draw("COL");
+  draw_time_axis(c2, h_trend_chips, &orbits);
+  draw_title(c2, Form("Run %i: all dead chips (total: %i)", run, n_dead));
+
+  TCanvas* c3 = new TCanvas("", "", 900, 600);
+  set_margins(c3, 0.06, 0.02, 0.13, 0.12);
+  h_trend_unmasked->Draw("COL");
+  draw_time_axis(c3, h_trend_unmasked, &orbits);
+  draw_title(c3, Form("Run %i: unmasked dead chips (total: %i)", run, n_unmasked));
+
+  return;
 }
 
 void mft_deadmaps ()
 {
   api.init("http://alice-ccdb.cern.ch");
 
-  download_deadmap(559211);
+  analyze_deadmap(559361);
 
   return;
 }
