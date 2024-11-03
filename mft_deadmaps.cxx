@@ -27,6 +27,14 @@ bool sort_chips (std::tuple<int, float> chip1, std::tuple<int, float> chip2)
   }
 }
 
+bool is_masked (int idx_chip)
+{
+  bool is_masked = false;
+  int* masked = std::find(std::begin(masked_chips), std::end(masked_chips), idx_chip);
+  if (masked != std::end(masked_chips)) is_masked = true;
+  return is_masked;
+}
+
 std::string unixts_to_string (long ts_ms, std::string format)
 {
   long ts_sec = ts_ms / 1000; // ms to sec
@@ -72,7 +80,57 @@ double get_fontsize (int n_chips)
 }
 
 template<typename T>
-void draw_time_axis (TCanvas* c, T* h, std::vector<unsigned long>* orbits)
+void draw_axis_graph (TCanvas* c, T* g, std::vector<unsigned long>* orbits)
+{
+  // to customize:
+  int n_labels = 20;
+
+  float y_min = TMath::MinElement(g->GetN(), g->GetY())-1;
+  float y_max = TMath::MaxElement(g->GetN(), g->GetY())+1;
+  g->GetYaxis()->SetRangeUser(y_min, y_max);
+  g->GetYaxis()->SetTickLength(0.01); 
+  g->GetYaxis()->SetTitle("#Dead chips");
+  // suppress the x-axis labels, ticks and title
+  g->GetXaxis()->SetLabelSize(0);
+  g->GetXaxis()->SetTitleSize(0);
+  g->GetXaxis()->SetTickSize(0);
+  double x_min, x_max, y;
+  g->GetPoint(0, x_min, y);
+  g->GetPoint(g->GetN()-1, x_max, y);
+  TAxis *x_ax = g->GetXaxis();
+  float edge = (x_max - x_min) * 0.05;
+  x_ax->SetLimits(x_min - edge, x_max + edge);
+
+  // x-axis labels and ticks
+  c->cd();
+  int incr = orbits->size() / (float)(n_labels-1);
+  float dy = (y_max - y_min) / (1. - c->GetTopMargin() - c->GetBottomMargin());
+  float tick_length = (y_max - y_min) * 0.02;
+  for (int i = 0; i < n_labels; i++) 
+  {
+    double x, y;
+    int curr_bin = i * incr;
+    g->GetPoint(curr_bin, x, y);
+    // tick 
+    TLine* l = new TLine(x, y_min, x, y_min + tick_length);
+    l->SetLineWidth(2);
+    l->Draw();
+    // label
+    auto orbit = orbits->at(curr_bin);
+    std::string label = unixts_to_string(orbit_to_unixts(orbit), "%d/%m, %H:%M");
+    float y_pos = y_min - dy * c->GetBottomMargin() / 20;
+    TLatex* t = new TLatex(x, y_pos, label.data());
+    t->SetTextSize(0.025);
+    t->SetTextFont(42);
+    t->SetTextAlign(33);
+    t->SetTextAngle(45);
+    t->Draw();
+  }
+  return;
+}
+
+template<typename T>
+void draw_axis_histo (TCanvas* c, T* h, std::vector<unsigned long>* orbits)
 {
   // to customize:
   int n_labels = 20;
@@ -88,21 +146,21 @@ void draw_time_axis (TCanvas* c, T* h, std::vector<unsigned long>* orbits)
   // x-axis labels and ticks
   c->cd();
   int incr = orbits->size() / (float)(n_labels-1);
-  float y_low = h->GetYaxis()->GetBinLowEdge(1);
-  float y_upp = h->GetYaxis()->GetBinLowEdge(h->GetNbinsY()+1);
-  float dy = (y_upp - y_low) / (1. - c->GetTopMargin() - c->GetBottomMargin());
-  float tick_length = (y_upp - y_low) * 0.02;
+  float y_min = h->GetYaxis()->GetBinLowEdge(1);
+  float y_max = h->GetYaxis()->GetBinLowEdge(h->GetNbinsY()+1);
+  float dy = (y_max - y_min) / (1. - c->GetTopMargin() - c->GetBottomMargin());
+  float tick_length = (y_max - y_min) * 0.02;
   for (int i = 0; i < n_labels; i++) 
   {
     int curr_bin = i * incr;
     // tick 
-    TLine* l = new TLine(curr_bin, y_low, curr_bin, y_low + tick_length);
+    TLine* l = new TLine(curr_bin, y_min, curr_bin, y_min + tick_length);
     l->SetLineWidth(2);
     l->Draw();
     // label
     auto orbit = orbits->at(curr_bin);
     std::string label = unixts_to_string(orbit_to_unixts(orbit), "%d/%m, %H:%M");
-    float y_pos = y_low - dy * c->GetBottomMargin() / 20;
+    float y_pos = y_min - dy * c->GetBottomMargin() / 20;
     TLatex* t = new TLatex(curr_bin, y_pos, label.data());
     t->SetTextSize(0.025);
     t->SetTextFont(42);
@@ -170,10 +228,12 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
   std::cout << " first orbit: " << orbit_first << "\n"
     << "  difference to the orbit at SOR: " << (float)orbit_first-orbit_SOR << " (OK if positive)\n"
     << " last orbit: " << orbit_last << "\n"
-    << "  difference to the orbit at EOR: " << (float)orbit_last-orbit_EOR << " (OK if negative)\n";
+    << "  difference to the orbit at EOR: " << (float)orbit_last-orbit_EOR << " (OK if negative)\n"
+    << " #points in the deadmap: " << n_orbits << "\n";
   
   int n_chips = 936;
-  TGraph* gr_trend = new TGraph();
+  TGraph* gr_trend_all = new TGraph();
+  TGraph* gr_trend_unmasked = new TGraph();
   TObjArray* arr_chips = new TObjArray(n_chips);
   arr_chips->SetOwner(true);
   for (int i = 0; i < n_chips; i++)
@@ -189,7 +249,7 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
     if (orbit > orbit_last) continue; 
     bool consecutive_chips = false;
     uint16_t first_dead = -1;
-    int total_dead = 0;
+    int dead_all(0), dead_unmasked(0);
 
     std::vector<uint16_t> chips = {};
     deadmap->getMapAtOrbit(orbit, chips);
@@ -197,42 +257,60 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
     for (const auto &chip : chips) 
     {
       if (chip & (uint16_t)(0x8000)) 
-      { // bitwise and 
-        // only true if "chip" in binary (0b) is 1xxx xxxx xxxx xxxx
-        // The first digit needs to be one, since 0x8000 = 0b1000 0000 0000 0000
+      { // bitwise AND: 
+        //  only true if "chip" in binary (0b) is 1xxx xxxx xxxx xxxx
+        //  the first digit needs to be one, since 0x8000 = 0b1000 0000 0000 0000
         auto first = chip - 0x8000;
-        if (debug) std::cout << " " << chip << ":\n" << "  " << first << "\n";
+
+        // count the first chip:
+        dead_all++;
+        if(!is_masked(first)) dead_unmasked++;
         ((TH1C*)arr_chips->At(first))->Fill(i_orb);
+        if (debug) std::cout << " " << chip << ":\n" << "  " << first << "\n";
+
         if (consecutive_chips) std::cerr << "Problem with consecutive chips!\n";
         consecutive_chips = true;
         first_dead = first;
       } else {
-        if (consecutive_chips) {
-          int n_consecutive = chip - first_dead + 1;
-          total_dead += n_consecutive;
-          for (int i = 1; i < n_consecutive-1; i++) 
-          {
-            if (debug) std::cout << "  " << first_dead+i << "\n";
-            ((TH1C*)arr_chips->At(first_dead+i))->Fill(i_orb);
+        // count all consecutive chips except the last one:
+        if (consecutive_chips) { 
+          int n_consecutive = chip - first_dead;
+          for (int i = 1; i < n_consecutive; i++) {
+            int this_chip = first_dead+i;
+            dead_all++;
+            if(!is_masked(this_chip)) dead_unmasked++;
+            ((TH1C*)arr_chips->At(this_chip))->Fill(i_orb);
+            if (debug) std::cout << "  " << this_chip << "\n";
           }
-        } else {
-          total_dead++;
         }
+        // count the current chip (in the case of consecutive chips, it is the last one):
+        dead_all++;
+        if(!is_masked(chip)) dead_unmasked++;
         if (debug) std::cout << " " << chip << "\n";
         ((TH1C*)arr_chips->At(chip))->Fill(i_orb);
         consecutive_chips = false;
       }
     }
-    if (debug) std::cout << " total: " << total_dead << "\n";
-    gr_trend->AddPoint(orbit, total_dead);
+    if (debug) std::cout << " total dead: " << dead_all << ", dead unmasked: " << dead_unmasked << "\n";
+    gr_trend_all->AddPoint(orbit, dead_all);
+    gr_trend_unmasked->AddPoint(orbit, dead_unmasked);
     i_orb++;
   }
 
-  // trend of total #dead chips
+  // trend of all and unmasked #dead chips
+  TCanvas* c0 = new TCanvas("", "", 900, 600);
+  set_margins(c0, 0.06, 0.02, 0.13, 0.08);
+  gr_trend_all->Draw("AL*");
+  draw_axis_graph(c0, gr_trend_all, &orbits);
+  draw_title(c0, Form("Run %i: trend of all dead chips", run));
+  c0->Print(Form("%i_trend_all.pdf", run));
+
   TCanvas* c1 = new TCanvas("", "", 900, 600);
-  set_margins(c1, 0.02, 0.02, 0.10, 0.12);
-  c1->cd();
-  gr_trend->Draw("AL");
+  set_margins(c1, 0.06, 0.02, 0.13, 0.08);
+  gr_trend_unmasked->Draw("AL*");
+  draw_axis_graph(c1, gr_trend_unmasked, &orbits);
+  draw_title(c1, Form("Run %i: trend of unmasked dead chips", run));
+  c1->Print(Form("%i_trend_unmasked.pdf", run));
 
   // count chips not present in the deadmap
   int n_ok = 0;
@@ -255,34 +333,29 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
     std:cerr << "Problem with masked chips!\n";
     return;
   }
-  TH2C* h_trend_chips = new TH2C("", "", n_orbits, 0, n_orbits, n_dead, 0, n_dead);
-  TH2C* h_trend_unmasked = new TH2C("", "", n_orbits, 0, n_orbits, n_unmasked, 0, n_unmasked);
+  TH2C* h_chips_all = new TH2C("", "", n_orbits, 0, n_orbits, n_dead, 0, n_dead);
+  TH2C* h_chips_unmasked = new TH2C("", "", n_orbits, 0, n_orbits, n_unmasked, 0, n_unmasked);
 
   int i_unmasked = 0;
   for (int i_dead = 0; i_dead < n_dead; i_dead++) 
   {
     int idx_chip = std::get<0>(dead_chips[i_dead]);
 
-    // is this a masked chip?
-    bool is_masked = false;
-    int *masked = std::find(std::begin(masked_chips), std::end(masked_chips), idx_chip);
-    if (masked != std::end(masked_chips)) is_masked = true;
-
     // loop over orbits:
     for (int i_orb = 0; i_orb < n_orbits; i_orb++) {
       if (((TH1C*)arr_chips->At(idx_chip))->GetBinContent(i_orb) > 0) {  // the chip was dead in this orbit
         // fill the histogram with all dead chips:
-        h_trend_chips->Fill(i_orb, n_dead-i_dead-1);
+        h_chips_all->Fill(i_orb, n_dead-i_dead-1);
         // fill the histo with unmasked only:
-        if (!is_masked) h_trend_unmasked->Fill(i_orb, n_unmasked-i_unmasked-1);
+        if (!is_masked(idx_chip)) h_chips_unmasked->Fill(i_orb, n_unmasked-i_unmasked-1);
       } 
     }
 
     // set custom bin labels
-    h_trend_chips->GetYaxis()->SetBinLabel(n_dead-i_dead, Form("#%i [%.0f%%]", idx_chip,
+    h_chips_all->GetYaxis()->SetBinLabel(n_dead-i_dead, Form("#%i [%.0f%%]", idx_chip,
       std::get<1>(dead_chips[i_dead]) / n_orbits * 100));
-    if (!is_masked) {
-      h_trend_unmasked->GetYaxis()->SetBinLabel(n_unmasked-i_unmasked, Form("#%i [%.0f%%]", idx_chip,
+    if (!is_masked(idx_chip)) {
+      h_chips_unmasked->GetYaxis()->SetBinLabel(n_unmasked-i_unmasked, Form("#%i [%.0f%%]", idx_chip,
         std::get<1>(dead_chips[i_dead]) / n_orbits * 100));
       i_unmasked++;
     }
@@ -290,15 +363,17 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
 
   TCanvas* c2 = new TCanvas("", "", 900, 600);
   set_margins(c2, 0.06, 0.02, 0.13, 0.12);
-  h_trend_chips->Draw("COL");
-  draw_time_axis(c2, h_trend_chips, &orbits);
+  h_chips_all->Draw("COL");
+  draw_axis_histo(c2, h_chips_all, &orbits);
   draw_title(c2, Form("Run %i: all dead chips (total: %i)", run, n_dead));
+  c2->Print(Form("%i_dead_all.pdf", run));
 
   TCanvas* c3 = new TCanvas("", "", 900, 600);
   set_margins(c3, 0.06, 0.02, 0.13, 0.12);
-  h_trend_unmasked->Draw("COL");
-  draw_time_axis(c3, h_trend_unmasked, &orbits);
+  h_chips_unmasked->Draw("COL");
+  draw_axis_histo(c3, h_chips_unmasked, &orbits);
   draw_title(c3, Form("Run %i: unmasked dead chips (total: %i)", run, n_unmasked));
+  c3->Print(Form("%i_dead_unmasked.pdf", run));
 
   return;
 }
