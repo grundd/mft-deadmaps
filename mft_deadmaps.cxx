@@ -298,19 +298,19 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
   }
 
   // trend of all and unmasked #dead chips
-  TCanvas* c0 = new TCanvas("", "", 900, 600);
+  TCanvas* c0 = new TCanvas("", "", 1500, 1000);
   set_margins(c0, 0.06, 0.02, 0.13, 0.08);
   gr_trend_all->Draw("AL*");
   draw_axis_graph(c0, gr_trend_all, &orbits);
   draw_title(c0, Form("Run %i: trend of all dead chips", run));
-  c0->Print(Form("%i_trend_all.pdf", run));
+  c0->Print(Form("%i_trend_all.png", run));
 
-  TCanvas* c1 = new TCanvas("", "", 900, 600);
+  TCanvas* c1 = new TCanvas("", "", 1500, 1000);
   set_margins(c1, 0.06, 0.02, 0.13, 0.08);
   gr_trend_unmasked->Draw("AL*");
   draw_axis_graph(c1, gr_trend_unmasked, &orbits);
   draw_title(c1, Form("Run %i: trend of unmasked dead chips", run));
-  c1->Print(Form("%i_trend_unmasked.pdf", run));
+  c1->Print(Form("%i_trend_unmasked.png", run));
 
   // count chips not present in the deadmap
   int n_ok = 0;
@@ -361,19 +361,19 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
     }
   }
 
-  TCanvas* c2 = new TCanvas("", "", 900, 600);
+  TCanvas* c2 = new TCanvas("", "", 1500, 1000);
   set_margins(c2, 0.06, 0.02, 0.13, 0.12);
   h_chips_all->Draw("COL");
   draw_axis_histo(c2, h_chips_all, &orbits);
   draw_title(c2, Form("Run %i: all dead chips (total: %i)", run, n_dead));
-  c2->Print(Form("%i_dead_all.pdf", run));
+  c2->Print(Form("%i_dead_all.png", run));
 
-  TCanvas* c3 = new TCanvas("", "", 900, 600);
+  TCanvas* c3 = new TCanvas("", "", 1500, 1000);
   set_margins(c3, 0.06, 0.02, 0.13, 0.12);
   h_chips_unmasked->Draw("COL");
   draw_axis_histo(c3, h_chips_unmasked, &orbits);
   draw_title(c3, Form("Run %i: unmasked dead chips (total: %i)", run, n_unmasked));
-  c3->Print(Form("%i_dead_unmasked.pdf", run));
+  c3->Print(Form("%i_dead_unmasked.png", run));
 
   return;
 }
