@@ -1,8 +1,30 @@
+// MFT dead maps
+// David Grund, 2024
+
+// cpp headers:
 #include <ctime>
 #include <vector>
+#include <tuple>
 #include <map>
+// root headers:
+#include "TSystem.h"
+#include "TStyle.h"
+#include "TMath.h"
+#include "TGraph.h"
+#include "TH2.h"
+#include "TCanvas.h"
+#include "TAxis.h"
+#include "TLine.h"
+#include "TLatex.h"
+#include "TBox.h"
+// o2 headers:
 #include "CCDB/CcdbApi.h"
-//#include "DataFormatsITSMFT/TimeDeadMap.h"
+/*
+#include "CCDB/BasicCCDBManager.h"
+#include "DataFormatsParameters/AggregatedRunInfo.h"
+#include "DataFormatsITSMFT/NoiseMap.h"
+#include "DataFormatsITSMFT/TimeDeadMap.h"
+*/
 
 // configure as needed:
 const int n_chips = 936;
@@ -15,7 +37,7 @@ int masked_chips[n_masked] = { // as of 2024
   551, 579, 580, 581
 };
 std::vector<std::tuple<long, long>> ts_cuts = {
-  {1730659440000, 1730659560000}
+  //{1730659440000, 1730659560000}
 };
 
 o2::ccdb::CcdbApi api;
@@ -23,7 +45,7 @@ long ts_SOR = -1;
 long ts_EOR = -1;
 long orbit_SOR = -1;
 long orbit_EOR = -1;
-std::vector<std::tuple<long, long>>* orbit_cuts;
+std::vector<std::tuple<unsigned long, unsigned long>>* orbit_cuts;
 long orbit_cut_low = -1;
 long orbit_cut_upp = -1;
 
@@ -75,10 +97,10 @@ long convert_orbit_unixts (long val, std::string input) // type == "orbit" or "t
 void set_orbit_cuts ()
 {
   if (!ts_cuts.empty()) {
-    orbit_cuts = new std::vector<std::tuple<long, long>>;
+    orbit_cuts = new std::vector<std::tuple<unsigned long, unsigned long>>;
     for (auto cut : ts_cuts) {
-      long orbit_cut_min = convert_orbit_unixts(std::get<0>(cut), "ts");
-      long orbit_cut_max = convert_orbit_unixts(std::get<1>(cut), "ts");
+      unsigned long orbit_cut_min = convert_orbit_unixts(std::get<0>(cut), "ts");
+      unsigned long orbit_cut_max = convert_orbit_unixts(std::get<1>(cut), "ts");
       orbit_cuts->push_back({orbit_cut_min, orbit_cut_max});
     }
   }
@@ -202,8 +224,8 @@ void draw_axis_histo (TCanvas* c, T* h, std::vector<unsigned long>* orbits)
   // if there are cut orbits, fill the space with a gray box
   if (orbit_cuts) {
     for (auto& cut : *orbit_cuts) {
-      long orbit_cut_min = std::get<0>(cut);
-      long orbit_cut_max = std::get<1>(cut);
+      unsigned long orbit_cut_min = std::get<0>(cut);
+      unsigned long orbit_cut_max = std::get<1>(cut);
       int x_min(0); 
       while (orbits->at(x_min) <= orbit_cut_min) x_min++;
       int x_max(x_min); 
@@ -232,6 +254,7 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
   gStyle->SetOptStat(0);
   int palette[2] = {kWhite, kRed+1};
   gStyle->SetPalette(2, palette);
+  gSystem->Exec(Form("mkdir -p %i/", run));
 
   auto runInf = o2::parameters::AggregatedRunInfo::buildAggregatedRunInfo(o2::ccdb::BasicCCDBManager::instance(), run);
   ts_SOR = runInf.sor;
@@ -298,8 +321,8 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
     // is a cut on orbits active?
     if (orbit_cuts) {
       for (auto& cut : *orbit_cuts) {
-        long orbit_cut_min = std::get<0>(cut);
-        long orbit_cut_max = std::get<1>(cut);
+        unsigned long orbit_cut_min = std::get<0>(cut);
+        unsigned long orbit_cut_max = std::get<1>(cut);
         if (orbit > orbit_cut_min && orbit < orbit_cut_max) dead_val = 0;
       }
     }
@@ -360,14 +383,14 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
   gr_trend_all->Draw("AL*");
   draw_axis_graph(c0, gr_trend_all, &orbits);
   draw_title(c0, Form("Run %i: trend of all dead chips", run));
-  c0->Print(Form("%i_trend_all.png", run));
+  c0->Print(Form("%i/%i_trend_all.png", run, run));
 
   TCanvas* c1 = new TCanvas("", "", 1800, 1200);
   set_margins(c1, 0.06, 0.02, 0.13, 0.09);
   gr_trend_unmasked->Draw("AL*");
   draw_axis_graph(c1, gr_trend_unmasked, &orbits);
   draw_title(c1, Form("Run %i: trend of unmasked dead chips", run));
-  c1->Print(Form("%i_trend_unmasked.png", run));
+  c1->Print(Form("%i/%i_trend_unmasked.png", run, run));
 
   // count chips not present in the deadmap
   int n_ok = 0;
@@ -423,23 +446,23 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
   h_chips_all->Draw("COL");
   draw_axis_histo(c2, h_chips_all, &orbits);
   draw_title(c2, Form("Run %i: all dead chips (total: %i)", run, n_dead));
-  c2->Print(Form("%i_dead_all.png", run));
+  c2->Print(Form("%i/%i_dead_all.png", run, run));
 
   TCanvas* c3 = new TCanvas("", "", 1800, 1200);
   set_margins(c3, 0.06, 0.02, 0.13, 0.13);
   h_chips_unmasked->Draw("COL");
   draw_axis_histo(c3, h_chips_unmasked, &orbits);
   draw_title(c3, Form("Run %i: unmasked dead chips (total: %i)", run, n_unmasked));
-  c3->Print(Form("%i_dead_unmasked.png", run));
+  c3->Print(Form("%i/%i_dead_unmasked.png", run, run));
 
   return;
 }
 
-void mft_deadmaps ()
+void mft_deadmaps (int run)
 {
   api.init("http://alice-ccdb.cern.ch");
 
-  analyze_deadmap(559443);
+  analyze_deadmap(run);
 
   return;
 }
