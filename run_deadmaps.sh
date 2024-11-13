@@ -1,8 +1,7 @@
 # chmod +x run_deadmaps.sh
 #!/bin/bash
 
-runs=(
-  559781
+runs=(559781
   559782
   559783
   559784
@@ -21,9 +20,9 @@ runs=(
   559917
   559919
   559920
-  559933
-)
-threshold=0. # already in percent
+  559933)
+
+threshold=0. # fraction, not percent!
 output_name=2024_PbPb_runs
 
 for run in "${runs[@]}"

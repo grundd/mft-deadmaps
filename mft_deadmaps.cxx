@@ -89,7 +89,7 @@ long convert_orbit_unixts (long val, std::string input) // type == "orbit" or "t
   if (input == "orbit") return (long)(val * a + b);
   if (input == "ts") return (long)((val - b) / a);
   else {
-    cout << "Supported input: 'orbit' or 'ts'!\n";
+    std::cout << "Supported input: 'orbit' or 'ts'!\n";
     return -1;
   }
 }
@@ -171,7 +171,7 @@ void draw_axis_graph (TCanvas* c, T* g, std::vector<unsigned long>* orbits)
 }
 
 template<typename T>
-TCanvas* plot_dead_chips (T* h, std::vector<unsigned long>* orbits, int run, float threshold)
+TCanvas* plot_dead_chips (T* h, std::vector<unsigned long>* orbits, int run, float threshold, std::string label)
 {
   // to customize:
   float pix_top = 80;
@@ -267,8 +267,8 @@ TCanvas* plot_dead_chips (T* h, std::vector<unsigned long>* orbits, int run, flo
     }
   }
 
-  std::string title_text = Form("Run %i: all dead chips (total: %i", run, h->GetNbinsY());
-  if (threshold > 0) title_text += Form(", threshold: %.1f%%)", threshold);
+  std::string title_text = Form("Run %i: %s dead chips (total: %i", run, label.data(), h->GetNbinsY());
+  if (threshold > 0.) title_text += Form(", threshold: %.1f%%)", threshold * 100.);
   else title_text += ")";
   TLatex* t = new TLatex();
   t->SetTextSize(60);
@@ -276,6 +276,7 @@ TCanvas* plot_dead_chips (T* h, std::vector<unsigned long>* orbits, int run, flo
   t->SetTextAlign(12);
   t->DrawLatexNDC((pix_left/2)/c_width, (c_height-pix_top/2)/c_height, title_text.data());
 
+  c->Print(Form("%i/%i_dead_%s.png", run, run, label.data()));
   return c;
 }
 
@@ -302,7 +303,7 @@ void analyze_deadmap (int run, float threshold, bool verbose = false, bool debug
   ts_EOR = runInf.eor;
   orbit_SOR = runInf.orbitSOR;
   orbit_EOR = runInf.orbitEOR;
-  cout << "Aggregated run information:\n"
+  std::cout << "Aggregated run information:\n"
     << " SOR: " << ts_SOR 
     << " (" << unixts_to_string((long)ts_SOR, "%m/%d/%Y, %H:%M:%S") << "), orbit: " << orbit_SOR << "\n"
     << " EOR: " << ts_EOR 
@@ -350,7 +351,6 @@ void analyze_deadmap (int run, float threshold, bool verbose = false, bool debug
     arr_chips->AddAt(h_chip, i);
   }
   std::vector<std::tuple<int, float>> dead_chips;
-  dead_chips.clear();
 
   // filter out selected timestamps
   set_orbit_cuts();
@@ -439,14 +439,14 @@ void analyze_deadmap (int run, float threshold, bool verbose = false, bool debug
   for (int i_chip = 0; i_chip < n_chips; i_chip++) {
     if (((TH1C*)arr_chips->At(i_chip))->GetEntries() == 0) n_ok++;
     float deadness = ((TH1C*)arr_chips->At(i_chip))->Integral();
-    if ((deadness / n_orbits * 100) > threshold) dead_chips.push_back({i_chip, deadness});
+    dead_chips.push_back({i_chip, deadness});
   }
   std::cout << "#Chips not present in the dead map: " << n_ok << "\n";
 
   // sort the chips, the most dead chips first
   std::sort(dead_chips.begin(), dead_chips.end(), sort_chips);
   int n_dead = 0;
-  while (std::get<1>(dead_chips[n_dead]) > 0) n_dead++;
+  while ((std::get<1>(dead_chips[n_dead]) / n_orbits) > threshold) n_dead++;
   std::cout << "#Chips present in the dead map: " << n_dead << "\n";
 
   // trend per chip
@@ -462,14 +462,17 @@ void analyze_deadmap (int run, float threshold, bool verbose = false, bool debug
   for (int i_dead = 0; i_dead < n_dead; i_dead++) 
   {
     int idx_chip = std::get<0>(dead_chips[i_dead]);
+    float deadness = std::get<1>(dead_chips[i_dead]);
 
     // loop over orbits:
     for (int i_orb = 0; i_orb < n_orbits; i_orb++) {
       if (((TH1C*)arr_chips->At(idx_chip))->GetBinContent(i_orb) > 0) {  // the chip was dead in this orbit
-        // fill the histogram with all dead chips:
-        h_chips_all->Fill(i_orb, n_dead-i_dead-1);
-        // fill the histo with unmasked only:
-        if (!is_masked(idx_chip)) h_chips_unmasked->Fill(i_orb, n_unmasked-i_unmasked-1);
+        if ((deadness / n_orbits) > threshold) {
+          // fill the histogram with all dead chips:
+          h_chips_all->Fill(i_orb, n_dead-i_dead-1);
+          // fill the histo with unmasked only:
+          if (!is_masked(idx_chip)) h_chips_unmasked->Fill(i_orb, n_unmasked-i_unmasked-1);
+        }
       } 
     }
 
@@ -483,11 +486,8 @@ void analyze_deadmap (int run, float threshold, bool verbose = false, bool debug
     }
   }
 
-  TCanvas* c2 = plot_dead_chips(h_chips_all, &orbits, run, threshold);
-  c2->Print(Form("%i/%i_dead_all.png", run, run));
-
-  TCanvas* c3 = plot_dead_chips(h_chips_unmasked, &orbits, run, threshold);
-  c3->Print(Form("%i/%i_dead_unmasked.png", run, run));
+  plot_dead_chips(h_chips_all, &orbits, run, threshold, "all");
+  plot_dead_chips(h_chips_unmasked, &orbits, run, threshold, "unmasked");
 
   return;
 }
@@ -497,7 +497,7 @@ void mft_deadmaps (int run, float threshold)
   api.init("http://alice-ccdb.cern.ch");
 
   float tr = 0;
-  if(threshold > 0 && threshold < 100) tr = threshold;
+  if(threshold > 0. && threshold < 1.) tr = threshold;
   analyze_deadmap(run, tr);
 
   return;
