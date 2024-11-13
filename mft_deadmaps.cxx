@@ -117,17 +117,6 @@ void set_margins (T* c, float t, float r, float b, float l)
   return;
 }
 
-double get_fontsize (int n_rows)
-{
-  int n1 = 23;
-  int n2 = 51;
-  double size1 = 0.038;
-  double size2 = 0.025;
-  double a = (size2 - size1) / (n2 - n1);
-  double b = size2 - a * n2;
-  return n_rows * a + b;
-}
-
 template<typename T>
 void draw_axis_graph (TCanvas* c, T* g, std::vector<unsigned long>* orbits)
 {
@@ -165,7 +154,7 @@ void draw_axis_graph (TCanvas* c, T* g, std::vector<unsigned long>* orbits)
     g->GetPoint(curr_bin, x, y);
     // tick 
     TLine* l = new TLine(x, y_min, x, y_min + tick_length);
-    l->SetLineWidth(2);
+    l->SetLineWidth(1);
     l->Draw();
     // label
     auto orbit = orbits->at(curr_bin);
@@ -182,43 +171,85 @@ void draw_axis_graph (TCanvas* c, T* g, std::vector<unsigned long>* orbits)
 }
 
 template<typename T>
-void draw_axis_histo (TCanvas* c, T* h, std::vector<unsigned long>* orbits)
+TCanvas* plot_dead_chips (T* h, std::vector<unsigned long>* orbits, int run, float threshold)
 {
   // to customize:
+  float pix_top = 80;
+  float pix_right = 30;
+  float pix_bottom = 200;
+  float pix_left = 180;
+  float pix_per_chip = 10;
+  if (h->GetNbinsY() < 80) {
+    pix_per_chip = 30;
+    pix_left = 220;
+  }
   int n_labels = 20;
+  
+  float c_height = pix_top + pix_bottom + h->GetNbinsY() * pix_per_chip;
+  int plot_width = h->GetNbinsX();
+  int n_sec_per_pix = 1; // one pixel per every X seconds
+  float c_width = plot_width;
+  while (c_width > 6000) {
+    n_sec_per_pix++;
+    c_width = plot_width / n_sec_per_pix;
+  }
+  c_width = pix_right + pix_left + c_width; 
 
-  h->GetYaxis()->SetTickLength(0.01); 
-  h->GetYaxis()->SetLabelSize(get_fontsize(h->GetNbinsY()));
-  h->GetYaxis()->SetTitleSize(0);
+  h->GetYaxis()->SetTickSize(0); 
+  h->GetYaxis()->SetLabelFont(63);
+  h->GetYaxis()->SetLabelSize(pix_per_chip);
+  h->GetYaxis()->SetLabelOffset(0.001);
   // suppress the x-axis labels, ticks and title
   h->GetXaxis()->SetLabelSize(0);
   h->GetXaxis()->SetTitleSize(0);
   h->GetXaxis()->SetTickSize(0);
 
+  TCanvas* c = new TCanvas("", "", c_width, c_height);
+  c->SetTopMargin(pix_top / c_height);
+  c->SetRightMargin(pix_right / c_width);
+  c->SetBottomMargin(pix_bottom / c_height);
+  c->SetLeftMargin(pix_left / c_width);
+  h->Draw("COL");
+
   // x-axis labels and ticks
-  c->cd();
   int incr = orbits->size() / (float)(n_labels-1);
   float y_min = h->GetYaxis()->GetBinLowEdge(1);
   float y_max = h->GetYaxis()->GetBinLowEdge(h->GetNbinsY()+1);
   float dy = (y_max - y_min) / (1. - c->GetTopMargin() - c->GetBottomMargin());
-  float tick_length = (y_max - y_min) * 0.02;
+  float tick_length = (y_max - y_min) / h->GetNbinsY();
   for (int i = 0; i < n_labels; i++) 
   {
     int curr_bin = i * incr;
     // tick 
     TLine* l = new TLine(curr_bin, y_min, curr_bin, y_min + tick_length);
-    l->SetLineWidth(2);
+    l->SetLineWidth(1);
     l->Draw();
     // label
     auto orbit = orbits->at(curr_bin);
     std::string label = unixts_to_string(convert_orbit_unixts(orbit, "orbit"), "%d/%m, %H:%M");
     float y_pos = y_min - dy * c->GetBottomMargin() / 20;
     TLatex* t = new TLatex(curr_bin, y_pos, label.data());
-    t->SetTextSize(0.025);
-    t->SetTextFont(42);
+    t->SetTextSize(40);
+    t->SetTextFont(63);
     t->SetTextAlign(33);
     t->SetTextAngle(45);
     t->Draw();
+  }
+
+  float x_min = h->GetXaxis()->GetBinLowEdge(1);
+  float x_max = h->GetXaxis()->GetBinLowEdge(h->GetNbinsX()+1);
+  // y-axis ticks
+  for (int i = 1; i < h->GetNbinsY()+1; i++) 
+  {
+    if (i % 2 == 0) {
+      float y_pos = h->GetYaxis()->GetBinLowEdge(i);
+      // tick 
+      TLine* l = new TLine(x_min, y_pos, x_max, y_pos);
+      l->SetLineWidth(1);
+      l->SetLineStyle(2);
+      l->SetLineColor(kGray+1);
+      l->Draw();
+    }
   }
 
   // if there are cut orbits, fill the space with a gray box
@@ -235,7 +266,17 @@ void draw_axis_histo (TCanvas* c, T* h, std::vector<unsigned long>* orbits)
       b->Draw();
     }
   }
-  return;
+
+  std::string title_text = Form("Run %i: all dead chips (total: %i", run, h->GetNbinsY());
+  if (threshold > 0) title_text += Form(", threshold: %.1f%%)", threshold);
+  else title_text += ")";
+  TLatex* t = new TLatex();
+  t->SetTextSize(60);
+  t->SetTextFont(63);
+  t->SetTextAlign(12);
+  t->DrawLatexNDC((pix_left/2)/c_width, (c_height-pix_top/2)/c_height, title_text.data());
+
+  return c;
 }
 
 void draw_title (TCanvas* c, std::string title)
@@ -249,7 +290,7 @@ void draw_title (TCanvas* c, std::string title)
   return;
 }
 
-void analyze_deadmap (int run, bool verbose = false, bool debug = false)
+void analyze_deadmap (int run, float threshold, bool verbose = false, bool debug = false)
 {
   gStyle->SetOptStat(0);
   int palette[2] = {kWhite, kRed+1};
@@ -309,6 +350,7 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
     arr_chips->AddAt(h_chip, i);
   }
   std::vector<std::tuple<int, float>> dead_chips;
+  dead_chips.clear();
 
   // filter out selected timestamps
   set_orbit_cuts();
@@ -397,7 +439,7 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
   for (int i_chip = 0; i_chip < n_chips; i_chip++) {
     if (((TH1C*)arr_chips->At(i_chip))->GetEntries() == 0) n_ok++;
     float deadness = ((TH1C*)arr_chips->At(i_chip))->Integral();
-    dead_chips.push_back({i_chip, deadness});
+    if ((deadness / n_orbits * 100) > threshold) dead_chips.push_back({i_chip, deadness});
   }
   std::cout << "#Chips not present in the dead map: " << n_ok << "\n";
 
@@ -432,37 +474,31 @@ void analyze_deadmap (int run, bool verbose = false, bool debug = false)
     }
 
     // set custom bin labels
-    h_chips_all->GetYaxis()->SetBinLabel(n_dead-i_dead, Form("#%i [%.0f%%]", idx_chip,
+    h_chips_all->GetYaxis()->SetBinLabel(n_dead-i_dead, Form("#%i [%.1f%%]", idx_chip,
       std::get<1>(dead_chips[i_dead]) / n_orbits * 100));
     if (!is_masked(idx_chip)) {
-      h_chips_unmasked->GetYaxis()->SetBinLabel(n_unmasked-i_unmasked, Form("#%i [%.0f%%]", idx_chip,
+      h_chips_unmasked->GetYaxis()->SetBinLabel(n_unmasked-i_unmasked, Form("#%i [%.1f%%]", idx_chip,
         std::get<1>(dead_chips[i_dead]) / n_orbits * 100));
       i_unmasked++;
     }
   }
 
-  TCanvas* c2 = new TCanvas("", "", 1800, 1200);
-  set_margins(c2, 0.06, 0.02, 0.13, 0.13);
-  h_chips_all->Draw("COL");
-  draw_axis_histo(c2, h_chips_all, &orbits);
-  draw_title(c2, Form("Run %i: all dead chips (total: %i)", run, n_dead));
+  TCanvas* c2 = plot_dead_chips(h_chips_all, &orbits, run, threshold);
   c2->Print(Form("%i/%i_dead_all.png", run, run));
 
-  TCanvas* c3 = new TCanvas("", "", 1800, 1200);
-  set_margins(c3, 0.06, 0.02, 0.13, 0.13);
-  h_chips_unmasked->Draw("COL");
-  draw_axis_histo(c3, h_chips_unmasked, &orbits);
-  draw_title(c3, Form("Run %i: unmasked dead chips (total: %i)", run, n_unmasked));
+  TCanvas* c3 = plot_dead_chips(h_chips_unmasked, &orbits, run, threshold);
   c3->Print(Form("%i/%i_dead_unmasked.png", run, run));
 
   return;
 }
 
-void mft_deadmaps (int run)
+void mft_deadmaps (int run, float threshold)
 {
   api.init("http://alice-ccdb.cern.ch");
 
-  analyze_deadmap(run);
+  float tr = 0;
+  if(threshold > 0 && threshold < 100) tr = threshold;
+  analyze_deadmap(run, tr);
 
   return;
 }
