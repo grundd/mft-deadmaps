@@ -151,6 +151,10 @@ void draw_axis_graph (TCanvas* c, T* g, std::vector<unsigned long>* orbits)
   {
     double x, y;
     int curr_bin = i * incr;
+    if (curr_bin >= orbits->size()) {
+      curr_bin = orbits->size()-1;
+      std::cout << "Index exceeded the vector size, forcing it to the last orbit!\n";
+    }
     g->GetPoint(curr_bin, x, y);
     // tick 
     TLine* l = new TLine(x, y_min, x, y_min + tick_length);
@@ -220,6 +224,10 @@ TCanvas* plot_dead_chips (T* h, std::vector<unsigned long>* orbits, int run, flo
   for (int i = 0; i < n_labels; i++) 
   {
     int curr_bin = i * incr;
+    if (curr_bin >= orbits->size()) {
+      curr_bin = orbits->size()-1;
+      std::cout << "Index exceeded the vector size, forcing it to the last orbit!\n";
+    }
     // tick 
     TLine* l = new TLine(curr_bin, y_min, curr_bin, y_min + tick_length);
     l->SetLineWidth(1);
