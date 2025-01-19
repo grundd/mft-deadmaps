@@ -1,6 +1,28 @@
 # chmod +x run_deadmaps.sh
 #!/bin/bash
 
+# 559535
+# 559544
+# 559545
+# 559561
+# 559574
+# 559575
+# 559595
+# 559596
+# 559613
+# 559614
+# 559615
+# 559616
+# 559617
+# 559631
+# 559632
+# 559679
+# 559680
+# 559681
+# 559713
+# 559731
+# 559749
+# 559762
 # 559781
 # 559782
 # 559783
@@ -19,7 +41,7 @@
 # 559903
 # 559917
 # 559919
-# 559920 
+# 559920
 # 559933
 # 559966
 # 559968
@@ -36,11 +58,15 @@
 # 560070
 # 560089
 # 560090
+# 560105
+# 560106
+# 560123
+# 560127
+# 560141
 
-runs=(560105)
+runs=(560372)
 
 threshold=0. # fraction, not percent!
-output_name=560105 # 2024_PbPb_runs
 
 for run in "${runs[@]}"
 do
@@ -48,6 +74,6 @@ do
   root -b -l -q 'mft_deadmaps.cxx('$run','$threshold')'
 done
 
-#echo "Adding to .zip archive: ${runs[@]}"
-
-#tar cvzf $output_name.zip "${runs[@]}"
+# output_name=560372 # 2024_PbPb_runs
+# echo "Adding to .zip archive: ${runs[@]}"
+# tar cvzf $output_name.zip "${runs[@]}"
