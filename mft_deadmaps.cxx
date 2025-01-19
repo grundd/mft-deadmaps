@@ -500,7 +500,7 @@ void analyze_deadmap (int run, float threshold, bool verbose = false, bool debug
   return;
 }
 
-void mft_deadmaps (int run, float threshold)
+void mft_deadmaps (int run, float threshold = 0.)
 {
   api.init("http://alice-ccdb.cern.ch");
 
