@@ -1,6 +1,4 @@
 .DS_Store
-*.pdf
-*.png
 *.zip
 */
 !readme/
