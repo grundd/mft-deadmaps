@@ -6,6 +6,7 @@
 #include <vector>
 #include <tuple>
 #include <map>
+#include <fstream>
 // root headers:
 #include "TSystem.h"
 #include "TStyle.h"
@@ -466,6 +467,9 @@ void analyze_deadmap (int run, float threshold, bool verbose = false, bool debug
   TH2C* h_chips_all = new TH2C("", "", n_orbits, 0, n_orbits, n_dead, 0, n_dead);
   TH2C* h_chips_unmasked = new TH2C("", "", n_orbits, 0, n_orbits, n_unmasked, 0, n_unmasked);
 
+  ofstream of_all(Form("%i/%i_dead_all.csv", run, run));
+  ofstream of_unmasked(Form("%i/%i_dead_unmasked.csv", run, run));
+
   int i_unmasked = 0;
   for (int i_dead = 0; i_dead < n_dead; i_dead++) 
   {
@@ -485,14 +489,20 @@ void analyze_deadmap (int run, float threshold, bool verbose = false, bool debug
     }
 
     // set custom bin labels
-    h_chips_all->GetYaxis()->SetBinLabel(n_dead-i_dead, Form("#%i [%.1f%%]", idx_chip,
-      std::get<1>(dead_chips[i_dead]) / n_orbits * 100));
+    float fraction = std::get<1>(dead_chips[i_dead]) / n_orbits * 100;
+
+    h_chips_all->GetYaxis()->SetBinLabel(n_dead-i_dead, Form("#%i [%.1f%%]", idx_chip, fraction));
+    of_all << idx_chip << ", " << std::fixed << std::setprecision(1) << fraction << "\n";
+
     if (!is_masked(idx_chip)) {
-      h_chips_unmasked->GetYaxis()->SetBinLabel(n_unmasked-i_unmasked, Form("#%i [%.1f%%]", idx_chip,
-        std::get<1>(dead_chips[i_dead]) / n_orbits * 100));
+      h_chips_unmasked->GetYaxis()->SetBinLabel(n_unmasked-i_unmasked, Form("#%i [%.1f%%]", idx_chip, fraction));
+      of_unmasked << idx_chip << ", " << std::fixed << std::setprecision(1) << fraction << "\n";
       i_unmasked++;
     }
   }
+
+  of_all.close();
+  of_unmasked.close();
 
   plot_dead_chips(h_chips_all, &orbits, run, threshold, "all");
   plot_dead_chips(h_chips_unmasked, &orbits, run, threshold, "unmasked");
